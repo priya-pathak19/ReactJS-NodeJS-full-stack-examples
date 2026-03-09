@@ -27,6 +27,12 @@ export function Sidebar({ activeTab, onSelect }: SidebarProps) {
         ⚡ AppForge
       </button>
       <button
+        className={`sidebar-item ${activeTab === "MCP" ? "active" : ""}`}
+        onClick={() => onSelect("MCP")}
+      >
+        🔌 MCP
+      </button>
+      <button
         className={`sidebar-item ${activeTab === "Test" ? "active" : ""}`}
         onClick={() => onSelect("test")}
       >

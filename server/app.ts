@@ -4,6 +4,8 @@ import "dotenv/config";
 import askRoute from "./routes/ragRoutes";
 import { bootstrapRAG } from "./rag/bootstrapRag";
 import agentRoutes from "./routes/agentRoutes";
+import { handleMcpRequest } from "./mcp/McpServer";
+import { runMcpChat } from "./mcp/Mcpclient";
 
 const express = require("express");
 // const morgan = require("morgan");
@@ -82,6 +84,30 @@ async function startServer() {
 
   app.get("/api/hello", (req, res) => {
     res.json({ message: "Hello from backend 👋" });
+  });
+
+  // ── MCP Server endpoint (tools live here) ──
+  app.post("/mcp", async (req, res) => {
+    try {
+      await handleMcpRequest(req, res);
+    } catch (err) {
+      console.error("MCP error:", err);
+      res.status(500).json({ error: "MCP server error" });
+    }
+  });
+
+  // ── MCP Chat endpoint (React calls this) ──
+  app.post("/api/mcp-chat", async (req, res) => {
+    const { message, history = [] } = req.body;
+    if (!message?.trim())
+      return res.status(400).json({ error: "Message required" });
+    try {
+      const result = await runMcpChat(message, history);
+      res.json(result);
+    } catch (err) {
+      console.error("MCP chat error:", err);
+      res.status(500).json({ error: "Failed to process message" });
+    }
   });
 
   // 404

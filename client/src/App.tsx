@@ -5,6 +5,7 @@ import { ApprovalPanel } from "./components/ApprovalPanel";
 import AskLLM from "./components/AskLLM";
 import AppGenerator from "./components/AppGenerator";
 import Test from "./components/TestComponent";
+import McpChat from "./components/McpChat";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("approval");
@@ -17,6 +18,7 @@ export default function App() {
         {activeTab === "approval" && <ApprovalPanel />}
         {activeTab === "askllm" && <AskLLM />}
         {activeTab === "app-generate" && <AppGenerator />}
+        {activeTab === "MCP" && <McpChat />}
         {activeTab === "test" && <Test />}
       </main>
     </div>
