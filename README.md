@@ -202,3 +202,241 @@ TEMPORAL_ADDRESS=localhost:7233
 | MCP Client        | MCP Store            | The bridge connecting an AI to MCP servers          |
 | Tool Use          | MCP Store + AppForge | Claude calling your functions to get real data      |
 | Agentic Loop      | MCP Store + AppForge | Claude calling tools repeatedly until task is done  |
+
+# Salesforce → Node.js → Slack Integration
+
+This guide explains how to trigger a **Slack notification when a Salesforce Case is created** using:
+
+- **Salesforce Flow**
+- **HTTP Callout**
+- **Node.js Express webhook**
+- **Slack API**
+
+Architecture:
+
+Salesforce Case Created
+↓
+Record Triggered Flow
+↓
+HTTP Callout
+↓
+Node.js Express
+↓
+Slack API
+↓
+Slack Channel Notification
+
+---
+
+# Prerequisites
+
+You should already have:
+
+- Salesforce **Developer Edition**
+- **Node.js Express server**
+- **Slack App with Bot Token**
+- Slack App added to your **channel**
+- **ngrok running** to expose your local server
+
+Example ngrok URL:
+
+https://foreknowingly-dedicational-shonta.ngrok-free.dev
+
+---
+
+# 1. Create External Credential
+
+Purpose: Allow Salesforce to access external APIs.
+
+Go to:
+
+Setup → External Credentials → New
+
+Create:
+
+| Field                   | Value               |
+| ----------------------- | ------------------- |
+| Label                   | NodeWebhookExternal |
+| Name                    | NodeWebhookExternal |
+| Authentication Protocol | No Authentication   |
+
+Save.
+
+---
+
+# 2. Create Principal
+
+Open:
+
+External Credentials → NodeWebhookExternal
+
+Add Principal:
+
+| Field                   | Value             |
+| ----------------------- | ----------------- |
+| Parameter Name          | NodePrincipal     |
+| Identity Type           | Named Principal   |
+| Authentication Protocol | No Authentication |
+
+Save.
+
+---
+
+# 3. Create Permission Set
+
+Purpose: Allow users to use the external credential.
+
+Setup → Permission Sets → New
+
+Create:
+
+| Field    | Value             |
+| -------- | ----------------- |
+| Label    | NodeWebhookAccess |
+| API Name | NodeWebhookAccess |
+
+Save.
+
+---
+
+# 4. Grant External Credential Access
+
+Open the permission set.
+
+Search for:
+
+External Credential Principal Access
+
+Add:
+
+NodeWebhookExternal → NodePrincipal
+
+Save.
+
+---
+
+# 5. Assign Permission Set to User
+
+Inside the permission set:
+
+Manage Assignments → Add Assignment
+
+Assign to your user.
+
+---
+
+# 6. Create Named Credential
+
+Purpose: Store the API base URL.
+
+Setup → Named Credentials → New
+
+Fill:
+
+| Field               | Value                                                    |
+| ------------------- | -------------------------------------------------------- |
+| Label               | NodeWebhook                                              |
+| Name                | NodeWebhook                                              |
+| URL                 | https://foreknowingly-dedicational-shonta.ngrok-free.dev |
+| External Credential | NodeWebhookExternal                                      |
+
+Save.
+
+---
+
+# 7. Create HTTP Callout
+
+Setup → HTTP Callouts → New
+
+Configure:
+
+| Field            | Value                    |
+| ---------------- | ------------------------ |
+| Name             | CaseSlackNotification    |
+| Named Credential | NodeWebhook              |
+| Method           | POST                     |
+| Path             | /salesforce/case-created |
+
+---
+
+# 8. Sample JSON Request
+
+Paste:
+
+```json
+{
+  "caseNumber": "00001001",
+  "subject": "Login Issue",
+  "priority": "High",
+  "description": "User cannot login"
+}
+```
+
+# 9. Sample JSON Response
+
+Choose:
+
+Use Example Response
+
+Paste:
+
+{
+"success": true
+}
+
+Save.
+
+# 10. Create Flow
+
+Go to:
+
+Setup → Flows → New Flow
+
+Select:
+
+Record Triggered Flow
+
+Configure:
+
+Field Value
+Object Case
+Trigger Record Created
+Optimize Actions and Related Records
+
+# 11. Add Asynchronous Path
+
+In the Start element:
+
+Add Asynchronous Path
+
+HTTP callouts must run asynchronously.
+
+# 12. Create Assignment
+
+Purpose: populate request body.
+
+Add element:
+
+Assignment → Set Request Body
+
+Set values:
+
+requestBody.caseNumber = $Record.CaseNumber
+requestBody.subject = $Record.Subject
+requestBody.priority = $Record.Priority
+requestBody.description = $Record.Description
+
+# 13. Add HTTP Callout Action
+
+Under Run Asynchronously:
+
+Action → CaseSlackNotification
+
+Set:
+
+body = requestBody
+
+# 14. Save and Activate Flow
+
+Save
+Activate

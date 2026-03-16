@@ -6,6 +6,7 @@ import { bootstrapRAG } from "./rag/bootstrapRag";
 import agentRoutes from "./routes/agentRoutes";
 import { handleMcpRequest } from "./mcp/mcpServer";
 import { runMcpChat } from "./mcp/mcpClient";
+import { WebClient } from "@slack/web-api";
 
 const express = require("express");
 // const morgan = require("morgan");
@@ -75,6 +76,46 @@ async function startServer() {
 
   app.use(express.urlencoded({ extended: true }));
   app.use(express.json());
+
+  // Slack Bot Token
+  const slackToken = process.env.SLACK_BOT_TOKEN;
+
+  // Slack channel id
+  const channelId = "C0ALSTZQPQS";
+
+  const slackClient = new WebClient(slackToken);
+
+  /**
+   * Webhook endpoint called by Salesforce Flow
+   */
+  app.post("/salesforce/case-created", async (req, res) => {
+    try {
+      console.log("Received Salesforce event:", req.body);
+
+      const { caseNumber, subject, priority, description } = req.body;
+
+      const message = `
+🚨 *New Salesforce Case Created*
+
+*Case Number:* ${caseNumber}
+*Subject:* ${subject}
+*Priority:* ${priority}
+
+*Description:*
+${description}
+`;
+
+      await slackClient.chat.postMessage({
+        channel: channelId,
+        text: message,
+      });
+
+      res.status(200).json({ success: true });
+    } catch (error) {
+      console.error("Slack send error:", error);
+      res.status(500).json({ error: "Slack message failed" });
+    }
+  });
 
   // Agent orchestration
   app.use("/api", agentRoutes);
