@@ -4,8 +4,8 @@ import "dotenv/config";
 import askRoute from "./routes/ragRoutes";
 import { bootstrapRAG } from "./rag/bootstrapRag";
 import agentRoutes from "./routes/agentRoutes";
-import { handleMcpRequest } from "./mcp/McpServer";
-import { runMcpChat } from "./mcp/Mcpclient";
+import { handleMcpRequest } from "./mcp/mcpServer";
+import { runMcpChat } from "./mcp/mcpClient";
 
 const express = require("express");
 // const morgan = require("morgan");
