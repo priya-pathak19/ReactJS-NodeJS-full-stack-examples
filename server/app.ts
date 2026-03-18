@@ -75,7 +75,7 @@ async function startServer() {
   );
 
   app.use(express.urlencoded({ extended: true }));
-  app.use(express.json());
+  app.use(express.json({ strict: false }));
 
   // Slack Bot Token
   const slackToken = process.env.SLACK_BOT_TOKEN;
@@ -90,25 +90,83 @@ async function startServer() {
    */
   app.post("/salesforce/case-created", async (req, res) => {
     try {
-      console.log("Received Salesforce event:", req.body);
+      const payload = { ...req.query, ...req.body };
 
-      const { caseNumber, subject, priority, description } = req.body;
+      console.log("Received Salesforce event:", payload);
 
-      const message = `
-🚨 *New Salesforce Case Created*
+      const {
+        eventType,
+        caseNumber,
+        subject,
+        priority,
+        description,
+        ownerEmail,
+      } = payload;
 
-*Case Number:* ${caseNumber}
-*Subject:* ${subject}
-*Priority:* ${priority}
+      // CASE CREATED
+      if (eventType === "CASE_CREATED") {
+        await slackClient.chat.postMessage({
+          channel: channelId,
+          text: "New Salesforce Case Created",
+          blocks: [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: `*New Case Created*`,
+              },
+            },
+            {
+              type: "section",
+              fields: [
+                {
+                  type: "mrkdwn",
+                  text: `• *Case Number:*\n${caseNumber}`,
+                },
+                {
+                  type: "mrkdwn",
+                  text: `• *Priority:*\n${priority}`,
+                },
+                {
+                  type: "mrkdwn",
+                  text: `• *Subject:*\n${subject}`,
+                },
+              ],
+            },
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: `• *Description:*\n${description}`,
+              },
+            },
+            {
+              type: "divider",
+            },
+            {
+              type: "context",
+              elements: [
+                {
+                  type: "mrkdwn",
+                  text: `Salesforce • Case Notification`,
+                },
+              ],
+            },
+          ],
+        });
+      }
 
-*Description:*
-${description}
-`;
+      // CASE UPDATED (priority escalation)
+      if (eventType === "CASE_UPDATED" && priority === "High" && ownerEmail) {
+        const user = await slackClient.users.lookupByEmail({
+          email: ownerEmail,
+        });
 
-      await slackClient.chat.postMessage({
-        channel: channelId,
-        text: message,
-      });
+        await slackClient.chat.postMessage({
+          channel: user.user.id,
+          text: `🔥 *High Priority Case Alert*\nCase ${caseNumber}: ${subject}`,
+        });
+      }
 
       res.status(200).json({ success: true });
     } catch (error) {
