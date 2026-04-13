@@ -79,15 +79,20 @@ async function startServer() {
   app.use(express.urlencoded({ extended: true }));
   app.use(express.json({ strict: false }));
 
+  // app.set("trust proxy", 1); // REQUIRED for ngrok  // for slack
+
   app.use(
     session({
       secret: "super-secret",
       resave: false,
       saveUninitialized: false,
+      // proxy: true, // for slack
       cookie: {
         secure: false, // true only in HTTPS
         httpOnly: true,
-        sameSite: "lax", //cookie is dropped after redirect
+        sameSite: "lax",
+        // sameSite: "none", // for slack
+        // secure: true, // for slack //cookie is dropped after redirect
       },
     }),
   );
@@ -99,6 +104,86 @@ async function startServer() {
   const channelId = "C0ALSTZQPQS";
 
   const slackClient = new WebClient(slackToken);
+  /**
+   * Slack authentication
+   */
+  app.get("/auth/slack", (req, res) => {
+    console.log("REDIRECT URI SENT:", process.env.SLACK_REDIRECT_URI);
+    const params = new URLSearchParams({
+      client_id: process.env.SLACK_CLIENT_ID,
+      user_scope: "users:read users:read.email",
+      redirect_uri: process.env.SLACK_REDIRECT_URI,
+    });
+
+    const slackAuthUrl = `https://slack.com/oauth/v2/authorize?${params}`;
+
+    res.redirect(slackAuthUrl);
+  });
+
+  app.get("/auth/slack/callback", async (req, res) => {
+    const code = req.query.code;
+
+    try {
+      // Step 1: Exchange code for access token
+      const tokenResponse = await fetch(
+        "https://slack.com/api/oauth.v2.access",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: new URLSearchParams({
+            code,
+            client_id: process.env.SLACK_CLIENT_ID,
+            client_secret: process.env.SLACK_CLIENT_SECRET,
+            redirect_uri: process.env.SLACK_REDIRECT_URI,
+          }),
+        },
+      );
+
+      const tokenData = await tokenResponse.json();
+
+      console.log("SLACK TOKEN RESPONSE:", tokenData);
+
+      const accessToken = tokenData?.authed_user?.access_token;
+      const userId = tokenData?.authed_user?.id;
+
+      if (!accessToken || !userId) {
+        return res.send("Slack Auth failed");
+      }
+
+      // Step 2: Fetch user info (correct API)
+      const userResponse = await fetch(
+        `https://slack.com/api/users.info?user=${userId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        },
+      );
+
+      const userData = await userResponse.json();
+      const user = userData.user;
+
+      console.log("SLACK USER:", user);
+
+      // ✅ Step 3: Save in session (SAME AS OUTLOOK)
+      req.session.user = {
+        name: user.real_name,
+        email: user.profile?.email,
+        provider: "slack",
+      };
+
+      // ✅ Step 4: Redirect WITHOUT query params
+      req.session.save(() => {
+        res.redirect("http://localhost:5173");
+      });
+    } catch (err) {
+      console.error(err);
+      res.send("Slack Auth failed");
+    }
+  });
+
   /**
    * Outlook authentication
    */
@@ -160,6 +245,7 @@ async function startServer() {
       req.session.user = {
         name: user.displayName,
         email: user.mail || user.userPrincipalName, // fallback if mail is null
+        provider: "outlook",
       };
       // Step 6: Save session and redirect back to frontend
       req.session.save(() => {
@@ -172,6 +258,7 @@ async function startServer() {
   });
   // Step 7: Frontend calls this API to get logged-in user
   app.get("/me", (req, res) => {
+    console.log("SESSION IN /me:", req.session);
     if (!req.session.user) {
       // If no user in session → not logged in
       return res.status(401).json({ error: "Not logged in" });
