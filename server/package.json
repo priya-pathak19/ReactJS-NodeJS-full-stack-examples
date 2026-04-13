@@ -32,6 +32,7 @@
     "dotenv": "^17.3.1",
     "ejs": "^3.1.2",
     "express": "^4.17.1",
+    "express-session": "^1.19.0",
     "groq-sdk": "^0.37.0",
     "lodash": "^4.17.15",
     "mongodb": "^7.1.0",

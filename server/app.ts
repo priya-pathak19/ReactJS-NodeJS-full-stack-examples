@@ -7,6 +7,7 @@ import agentRoutes from "./routes/agentRoutes";
 import { handleMcpRequest } from "./mcp/mcpServer";
 import { runMcpChat } from "./mcp/mcpClient";
 import { WebClient } from "@slack/web-api";
+import session from "express-session";
 
 const express = require("express");
 // const morgan = require("morgan");
@@ -71,11 +72,25 @@ async function startServer() {
   app.use(
     cors({
       origin: "http://localhost:5173",
+      credentials: true,
     }),
   );
 
   app.use(express.urlencoded({ extended: true }));
   app.use(express.json({ strict: false }));
+
+  app.use(
+    session({
+      secret: "super-secret",
+      resave: false,
+      saveUninitialized: false,
+      cookie: {
+        secure: false, // true only in HTTPS
+        httpOnly: true,
+        sameSite: "lax", //cookie is dropped after redirect
+      },
+    }),
+  );
 
   // Slack Bot Token
   const slackToken = process.env.SLACK_BOT_TOKEN;
@@ -84,6 +99,86 @@ async function startServer() {
   const channelId = "C0ALSTZQPQS";
 
   const slackClient = new WebClient(slackToken);
+  /**
+   * Outlook authentication
+   */
+
+  // Step 1: User clicks "Login with Outlook"
+  // This API redirects user to Microsoft login page
+
+  app.get("/auth/outlook", (req, res) => {
+    // These are the parameters required by Microsoft OAuth
+    const params = new URLSearchParams({
+      client_id: process.env.OUTLOOK_CLIENT_ID, // your app ID
+      response_type: "code", // we want an auth "code" back
+      redirect_uri: process.env.OUTLOOK_REDIRECT_URI, // where Microsoft will send user back
+      response_mode: "query", // code will come in query params
+      scope: "openid profile email User.Read", // permissions we are asking for
+    });
+    // Microsoft login URL with all params
+    const authUrl = `https://login.microsoftonline.com/${process.env.OUTLOOK_TENANT}/oauth2/v2.0/authorize?${params}`;
+    // Redirect user to Microsoft login page
+    res.redirect(authUrl);
+  });
+
+  // Step 2: Microsoft redirects back to this API after login : which was set in app registration
+  app.get("/auth/outlook/callback", async (req, res) => {
+    // Get the "code" sent by Microsoft
+    const code = req.query.code;
+
+    try {
+      // Step 3: Exchange "code" for access token
+      const tokenResponse = await fetch(
+        `https://login.microsoftonline.com/${process.env.OUTLOOK_TENANT}/oauth2/v2.0/token`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: new URLSearchParams({
+            client_id: process.env.OUTLOOK_CLIENT_ID,
+            client_secret: process.env.OUTLOOK_CLIENT_SECRET,
+            code,
+            redirect_uri: process.env.OUTLOOK_REDIRECT_URI,
+            grant_type: "authorization_code",
+          }),
+        },
+      );
+      const tokenData = await tokenResponse.json();
+      // Step 4: Use access token to get user details from Microsoft Graph
+      const userResponse = await fetch("https://graph.microsoft.com/v1.0/me", {
+        headers: {
+          Authorization: `Bearer ${tokenData.access_token}`, // send token here
+        },
+      });
+
+      const user = await userResponse.json();
+
+      console.log("GRAPH USER:", user);
+
+      // Step 5: Save user info in session (stored on backend)
+      req.session.user = {
+        name: user.displayName,
+        email: user.mail || user.userPrincipalName, // fallback if mail is null
+      };
+      // Step 6: Save session and redirect back to frontend
+      req.session.save(() => {
+        res.redirect("http://localhost:5173");
+      });
+    } catch (err) {
+      console.error(err);
+      res.send("Auth failed");
+    }
+  });
+  // Step 7: Frontend calls this API to get logged-in user
+  app.get("/me", (req, res) => {
+    if (!req.session.user) {
+      // If no user in session → not logged in
+      return res.status(401).json({ error: "Not logged in" });
+    }
+    // If logged in → return user data
+    res.json(req.session.user);
+  });
 
   /**
    * Webhook endpoint called by Salesforce Flow
