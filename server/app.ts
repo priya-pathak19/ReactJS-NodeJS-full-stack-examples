@@ -8,6 +8,7 @@ import { handleMcpRequest } from "./mcp/mcpServer";
 import { runMcpChat } from "./mcp/mcpClient";
 import { WebClient } from "@slack/web-api";
 import session from "express-session";
+import { authService } from "./auth/authService";
 
 const express = require("express");
 // const morgan = require("morgan");
@@ -105,6 +106,55 @@ async function startServer() {
 
   const slackClient = new WebClient(slackToken);
   /**
+   * provider agnostic authentication ---------------------
+   */
+  // Step 1: Redirect to provider login
+  app.get("/auth/:provider", (req, res) => {
+    const { provider } = req.params;
+
+    authService.login(provider, req, res);
+  });
+
+  // Step 2: Callback from provider
+  app.get("/auth/:provider/callback", async (req, res) => {
+    const { provider } = req.params;
+
+    try {
+      await authService.callback(provider, req, res);
+
+      // redirect to frontend after success
+      res.redirect("http://localhost:5173");
+    } catch (err) {
+      console.error(err);
+      res.status(500).send("Authentication failed");
+    }
+  });
+
+  app.get("/me", (req, res) => {
+    console.log("SESSION IN /me:", req.session);
+    if (!req.session.user) {
+      // If no user in session → not logged in
+      return res.status(401).json({ error: "Not logged in" });
+    }
+    // If logged in → return user data
+    res.json(req.session.user);
+  });
+
+  app.get("/logout", (req, res) => {
+    req.session.destroy((err) => {
+      if (err) {
+        console.error("Logout error:", err);
+        return res.status(500).send("Logout failed");
+      }
+
+      // clear cookie in browser
+      res.clearCookie("connect.sid");
+
+      res.send({ message: "Logged out successfully" });
+    });
+  });
+
+  /**
    * Slack authentication
    */
   app.get("/auth/slack", (req, res) => {
@@ -191,81 +241,72 @@ async function startServer() {
   // Step 1: User clicks "Login with Outlook"
   // This API redirects user to Microsoft login page
 
-  app.get("/auth/outlook", (req, res) => {
-    // These are the parameters required by Microsoft OAuth
-    const params = new URLSearchParams({
-      client_id: process.env.OUTLOOK_CLIENT_ID, // your app ID
-      response_type: "code", // we want an auth "code" back
-      redirect_uri: process.env.OUTLOOK_REDIRECT_URI, // where Microsoft will send user back
-      response_mode: "query", // code will come in query params
-      scope: "openid profile email User.Read", // permissions we are asking for
-    });
-    // Microsoft login URL with all params
-    const authUrl = `https://login.microsoftonline.com/${process.env.OUTLOOK_TENANT}/oauth2/v2.0/authorize?${params}`;
-    // Redirect user to Microsoft login page
-    res.redirect(authUrl);
-  });
+  // app.get("/auth/outlook", (req, res) => {
+  //   // These are the parameters required by Microsoft OAuth
+  //   const params = new URLSearchParams({
+  //     client_id: process.env.OUTLOOK_CLIENT_ID, // your app ID
+  //     response_type: "code", // we want an auth "code" back
+  //     redirect_uri: process.env.OUTLOOK_REDIRECT_URI, // where Microsoft will send user back
+  //     response_mode: "query", // code will come in query params
+  //     scope: "openid profile email User.Read", // permissions we are asking for
+  //   });
+  //   // Microsoft login URL with all params
+  //   const authUrl = `https://login.microsoftonline.com/${process.env.OUTLOOK_TENANT}/oauth2/v2.0/authorize?${params}`;
+  //   // Redirect user to Microsoft login page
+  //   res.redirect(authUrl);
+  // });
 
   // Step 2: Microsoft redirects back to this API after login : which was set in app registration
-  app.get("/auth/outlook/callback", async (req, res) => {
-    // Get the "code" sent by Microsoft
-    const code = req.query.code;
+  // app.get("/auth/outlook/callback", async (req, res) => {
+  //   // Get the "code" sent by Microsoft
+  //   const code = req.query.code;
 
-    try {
-      // Step 3: Exchange "code" for access token
-      const tokenResponse = await fetch(
-        `https://login.microsoftonline.com/${process.env.OUTLOOK_TENANT}/oauth2/v2.0/token`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-          },
-          body: new URLSearchParams({
-            client_id: process.env.OUTLOOK_CLIENT_ID,
-            client_secret: process.env.OUTLOOK_CLIENT_SECRET,
-            code,
-            redirect_uri: process.env.OUTLOOK_REDIRECT_URI,
-            grant_type: "authorization_code",
-          }),
-        },
-      );
-      const tokenData = await tokenResponse.json();
-      // Step 4: Use access token to get user details from Microsoft Graph
-      const userResponse = await fetch("https://graph.microsoft.com/v1.0/me", {
-        headers: {
-          Authorization: `Bearer ${tokenData.access_token}`, // send token here
-        },
-      });
+  //   try {
+  //     // Step 3: Exchange "code" for access token
+  //     const tokenResponse = await fetch(
+  //       `https://login.microsoftonline.com/${process.env.OUTLOOK_TENANT}/oauth2/v2.0/token`,
+  //       {
+  //         method: "POST",
+  //         headers: {
+  //           "Content-Type": "application/x-www-form-urlencoded",
+  //         },
+  //         body: new URLSearchParams({
+  //           client_id: process.env.OUTLOOK_CLIENT_ID,
+  //           client_secret: process.env.OUTLOOK_CLIENT_SECRET,
+  //           code,
+  //           redirect_uri: process.env.OUTLOOK_REDIRECT_URI,
+  //           grant_type: "authorization_code",
+  //         }),
+  //       },
+  //     );
+  //     const tokenData = await tokenResponse.json();
+  //     // Step 4: Use access token to get user details from Microsoft Graph
+  //     const userResponse = await fetch("https://graph.microsoft.com/v1.0/me", {
+  //       headers: {
+  //         Authorization: `Bearer ${tokenData.access_token}`, // send token here
+  //       },
+  //     });
 
-      const user = await userResponse.json();
+  //     const user = await userResponse.json();
 
-      console.log("GRAPH USER:", user);
+  //     console.log("GRAPH USER:", user);
 
-      // Step 5: Save user info in session (stored on backend)
-      req.session.user = {
-        name: user.displayName,
-        email: user.mail || user.userPrincipalName, // fallback if mail is null
-        provider: "outlook",
-      };
-      // Step 6: Save session and redirect back to frontend
-      req.session.save(() => {
-        res.redirect("http://localhost:5173");
-      });
-    } catch (err) {
-      console.error(err);
-      res.send("Auth failed");
-    }
-  });
+  //     // Step 5: Save user info in session (stored on backend)
+  //     req.session.user = {
+  //       name: user.displayName,
+  //       email: user.mail || user.userPrincipalName, // fallback if mail is null
+  //       provider: "outlook",
+  //     };
+  //     // Step 6: Save session and redirect back to frontend
+  //     req.session.save(() => {
+  //       res.redirect("http://localhost:5173");
+  //     });
+  //   } catch (err) {
+  //     console.error(err);
+  //     res.send("Auth failed");
+  //   }
+  // });
   // Step 7: Frontend calls this API to get logged-in user
-  app.get("/me", (req, res) => {
-    console.log("SESSION IN /me:", req.session);
-    if (!req.session.user) {
-      // If no user in session → not logged in
-      return res.status(401).json({ error: "Not logged in" });
-    }
-    // If logged in → return user data
-    res.json(req.session.user);
-  });
 
   /**
    * Webhook endpoint called by Salesforce Flow

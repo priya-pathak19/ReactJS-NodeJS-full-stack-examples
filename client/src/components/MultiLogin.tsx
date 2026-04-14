@@ -8,51 +8,65 @@ type User = {
 
 const Login = () => {
   const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const handleMicrosoft = () => {
-    window.location.href = "http://localhost:3000/auth/outlook";
+  const BACKEND_URL = "http://localhost:3000";
+
+  const login = (provider: string) => {
+    window.location.href = `${BACKEND_URL}/auth/${provider}`;
   };
 
-  const handleSlack = () => {
-    window.location.href = "http://localhost:3000/auth/slack";
+  const fetchUser = async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/me`, {
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        setUser(null);
+        return;
+      }
+
+      const data = await res.json();
+
+      // ⚠️ IMPORTANT FIX (you missed this)
+      setUser(data);
+    } catch (err) {
+      console.error(err);
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    const fetchUser = async () => {
-      try {
-        const res = await fetch("http://localhost:3000/me", {
-          // "https://foreknowingly-dedicational-shonta.ngrok-free.dev/me" -> for slack
-          credentials: "include",
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          console.log(data, "dataaa");
-          setUser(data);
-        }
-      } catch (err) {
-        console.error(err);
-      }
-    };
-
     fetchUser();
   }, []);
 
-  // 🔄 Not logged in → show BOTH buttons
+  // ⏳ Loading state (important for OAuth redirect flow)
+  if (loading) {
+    return <div>Loading...</div>;
+  }
+
+  // 🔐 Not logged in
   if (!user) {
     return (
       <div>
-        <button onClick={handleMicrosoft}>🔐 Authenticate with Outlook</button>
+        <h2>Login</h2>
+
+        <button onClick={() => login("microsoft")}>
+          🔐 Login with Microsoft
+        </button>
 
         <br />
         <br />
 
-        <button onClick={handleSlack}>🔐 Authenticate with Slack</button>
+        <button onClick={() => login("slack")}>🔐 Login with Slack</button>
       </div>
     );
   }
 
-  // ✅ Logged in → show user + provider
+  // ✅ Logged in
   return (
     <div style={{ color: "black" }}>
       <h2>Welcome {user.name}</h2>
@@ -60,6 +74,19 @@ const Login = () => {
       <p>
         Logged in via: <b>{user.provider || "Unknown"}</b>
       </p>
+
+      <br />
+
+      <button
+        onClick={async () => {
+          await fetch(`${BACKEND_URL}/logout`, {
+            credentials: "include",
+          });
+          setUser(null);
+        }}
+      >
+        Logout
+      </button>
     </div>
   );
 };
